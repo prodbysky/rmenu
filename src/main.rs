@@ -72,7 +72,12 @@ impl RMenu {
 
         let ui = UI::new(
             handle
-                .load_font_ex(&thread, "iosevka-regular.ttf", FONT_SIZE, None)
+                .load_font_ex(
+                    &thread,
+                    "/usr/local/bin/iosevka-regular.ttf",
+                    FONT_SIZE,
+                    None,
+                )
                 .unwrap(),
         );
 
