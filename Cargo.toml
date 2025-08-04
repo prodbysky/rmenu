@@ -5,3 +5,10 @@ edition = "2024"
 
 [dependencies]
 raylib = "5.5.1"
+
+[profile.release]
+strip = true
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
