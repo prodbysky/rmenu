@@ -8,141 +8,208 @@ use std::process::Command;
 const MAX_SUGGESTIONS: usize = 5;
 const FONT_SIZE: i32 = 32;
 
+use raylib::RaylibHandle;
+use raylib::RaylibThread;
 use raylib::math::Rectangle;
 use raylib::math::Vector2;
+use raylib::text::Font;
 use raylib::text::RaylibFont;
 use raylib::{color::Color, drawing::RaylibDraw, ffi::KeyboardKey};
 
-fn main() {
-    let (mut handle, thread) = raylib::RaylibBuilder::default()
-        .size(640, 480)
-        .title("rmenu")
-        .vsync()
-        .msaa_4x()
-        .transparent()
-        .build();
+struct RMenu {
+    h: RaylibHandle,
+    t: RaylibThread,
 
-    let font = handle
-        .load_font_ex(&thread, "iosevka-regular.ttf", FONT_SIZE, None)
-        .unwrap();
+    buffer: String,
+    buffer_pos: usize,
 
-    let single_char_size = font.measure_text("a", FONT_SIZE as f32, 0.0);
-    let single_element_height = single_char_size.y * 2.0;
-    let pad_left = single_char_size.x;
-    let pad_top = single_char_size.y / 2.0;
+    selected_item: usize,
 
-    let margin_y = single_char_size.y / 4.0;
+    available_programs: HashSet<String>,
 
-    handle.set_window_size(
-        640,
-        12 * single_char_size.y as i32 + (pad_top * 2.0) as i32 + margin_y as i32,
-    );
+    ui: UI,
+}
 
-    let mut buffer = String::new();
-    let mut pos = 0;
+struct UI {
+    font: Font,
+}
 
-    let mut selected_item = 0;
+impl UI {
+    fn new(f: Font) -> Self {
+        Self { font: f }
+    }
 
-    let available = get_executables_on_path();
+    fn char_size(&self) -> Vector2 {
+        self.font.measure_text("a", FONT_SIZE as f32, 0.0)
+    }
 
-    while !handle.window_should_close() {
-        let mut relevant = available
+    fn single_element_h(&self) -> f32 {
+        self.char_size().y * 2.0
+    }
+
+    fn pad_left(&self) -> f32 {
+        self.char_size().x
+    }
+
+    fn pad_top(&self) -> f32 {
+        self.char_size().y / 2.0
+    }
+
+    fn margin_y(&self) -> f32 {
+        self.pad_top() / 2.0
+    }
+}
+
+impl RMenu {
+    fn new() -> Self {
+        let (mut handle, thread) = raylib::RaylibBuilder::default()
+            .size(640, 480)
+            .title("rmenu")
+            .vsync()
+            .msaa_4x()
+            .transparent()
+            .build();
+
+        let ui = UI::new(
+            handle
+                .load_font_ex(&thread, "iosevka-regular.ttf", FONT_SIZE, None)
+                .unwrap(),
+        );
+
+        handle.set_window_size(
+            640,
+            12 * ui.char_size().y as i32 + (ui.pad_top() * 2.0) as i32 + ui.margin_y() as i32,
+        );
+        Self {
+            h: handle,
+            t: thread,
+            buffer: String::new(),
+            buffer_pos: 0,
+            selected_item: 0,
+            available_programs: get_executables_on_path(),
+            ui,
+        }
+    }
+    fn get_relevant(&self) -> Vec<String> {
+        let mut relevant = self
+            .available_programs
             .iter()
-            .filter(|exe_name| exe_name.starts_with(&buffer))
+            .filter(|exe_name| (*(*exe_name)).starts_with(&self.buffer))
+            .map(|s| s.clone())
             .collect::<Vec<_>>();
         relevant.sort_by(|l, r| (l.len() as i32 - r.len() as i32).cmp(&0));
-        let relevant = relevant.iter().take(MAX_SUGGESTIONS).collect::<Vec<_>>();
+        relevant
+            .iter()
+            .take(MAX_SUGGESTIONS)
+            .map(|s| s.clone())
+            .collect::<Vec<_>>()
+    }
 
-        if let Some(c) = handle.get_char_pressed() {
-            buffer.push(c);
-            pos += 1;
-        }
-        if handle.is_key_pressed(KeyboardKey::KEY_ENTER) {
-            Command::new("alacritty")
-                .arg("-e")
-                .arg(relevant[selected_item])
-                .spawn()
-                .unwrap();
-            break;
-        }
-        if handle.is_key_down(KeyboardKey::KEY_BACKSPACE) {
-            if pos != 0 {
-                buffer.remove(pos - 1);
-                pos -= 1;
-            }
-        }
+    fn run(mut self) {
+        while !self.h.window_should_close() {
+            let relevant = self.get_relevant();
 
-        if handle.is_key_pressed(KeyboardKey::KEY_LEFT) {
-            if pos > 0 {
-                pos -= 1;
+            if let Some(c) = self.h.get_char_pressed() {
+                self.buffer.push(c);
+                self.buffer_pos += 1;
             }
-        }
-        if handle.is_key_pressed(KeyboardKey::KEY_RIGHT) {
-            if pos < buffer.len() {
-                pos += 1;
+            if self.h.is_key_pressed(KeyboardKey::KEY_ENTER) {
+                Command::new("alacritty")
+                    .arg("-e")
+                    .arg(&relevant[self.selected_item])
+                    .spawn()
+                    .unwrap();
+                return;
             }
-        }
-        if handle.is_key_pressed(KeyboardKey::KEY_UP) {
-            if selected_item > 0 {
-                selected_item -= 1;
+            if self.h.is_key_down(KeyboardKey::KEY_BACKSPACE) {
+                if self.buffer_pos != 0 {
+                    self.buffer.remove(self.buffer_pos - 1);
+                    self.buffer_pos -= 1;
+                }
             }
-        }
-        if handle.is_key_pressed(KeyboardKey::KEY_DOWN) {
-            if selected_item < MAX_SUGGESTIONS - 1 {
-                selected_item += 1;
-            }
-        }
-        let mut draw = handle.begin_drawing(&thread);
-        draw.clear_background(Color::get_color(0x18181822));
-        let mut y_pos = pad_top;
-        draw.draw_rectangle_rounded(
-            Rectangle::new(
-                pad_left,
-                pad_top,
-                640.0 - pad_left * 2.0,
-                single_element_height,
-            ),
-            0.4,
-            12,
-            Color::get_color(0xffffff20),
-        );
-        y_pos += single_char_size.y / 2.0;
-        draw.draw_text_ex(
-            &font,
-            &buffer,
-            Vector2::new(pad_left + pad_left / 2.0, y_pos),
-            FONT_SIZE as f32,
-            0.0,
-            Color::RAYWHITE,
-        );
-        y_pos += single_char_size.y * 1.5;
 
-        for (i, name) in relevant.iter().enumerate() {
-            if i == selected_item {
-                draw.draw_rectangle_rounded(
-                    Rectangle::new(
-                        pad_left,
-                        single_element_height * (i + 1) as f32 + pad_top + margin_y,
-                        640.0 - pad_left * 2.0,
-                        single_element_height,
-                    ),
-                    0.4,
-                    12,
-                    Color::get_color(0xffffff20),
-                );
+            if self.h.is_key_pressed(KeyboardKey::KEY_LEFT) {
+                if self.buffer_pos > 0 {
+                    self.buffer_pos -= 1;
+                }
             }
-            y_pos += single_char_size.y / 2.0;
+            if self.h.is_key_pressed(KeyboardKey::KEY_RIGHT) {
+                if self.buffer_pos < self.buffer.len() {
+                    self.buffer_pos += 1;
+                }
+            }
+            if self.h.is_key_pressed(KeyboardKey::KEY_UP) {
+                if self.selected_item > 0 {
+                    self.selected_item -= 1;
+                }
+            }
+            if self.h.is_key_pressed(KeyboardKey::KEY_DOWN) {
+                if self.selected_item < MAX_SUGGESTIONS - 1 {
+                    self.selected_item += 1;
+                }
+            }
+            let mut draw = self.h.begin_drawing(&self.t);
+            draw.clear_background(Color::get_color(0x18181822));
+            let mut y_pos = self.ui.pad_top();
+            draw.draw_rectangle_rounded(
+                Rectangle::new(
+                    self.ui.pad_left(),
+                    self.ui.pad_top(),
+                    640.0 - self.ui.pad_left() * 2.0,
+                    self.ui.single_element_h(),
+                ),
+                0.4,
+                12,
+                Color::get_color(0xffffff20),
+            );
+            y_pos += self.ui.char_size().y / 2.0;
             draw.draw_text_ex(
-                &font,
-                &name,
-                Vector2::new(pad_left + pad_left / 2.0, y_pos + margin_y),
+                &self.ui.font,
+                &self.buffer,
+                Vector2::new(self.ui.pad_left() + self.ui.pad_left() / 2.0, y_pos),
                 FONT_SIZE as f32,
                 0.0,
                 Color::RAYWHITE,
             );
-            y_pos += single_char_size.y * 1.5;
+            y_pos += self.ui.char_size().y * 1.5;
+
+            for (i, name) in relevant.iter().enumerate() {
+                if i == self.selected_item {
+                    draw.draw_rectangle_rounded(
+                        Rectangle::new(
+                            self.ui.pad_left(),
+                            self.ui.single_element_h() * (i + 1) as f32
+                                + self.ui.pad_top()
+                                + self.ui.margin_y(),
+                            640.0 - self.ui.pad_left() * 2.0,
+                            self.ui.single_element_h(),
+                        ),
+                        0.4,
+                        12,
+                        Color::get_color(0xffffff20),
+                    );
+                }
+                y_pos += self.ui.char_size().y / 2.0;
+                draw.draw_text_ex(
+                    &self.ui.font,
+                    &name,
+                    Vector2::new(
+                        self.ui.pad_left() + self.ui.pad_left() / 2.0,
+                        y_pos + self.ui.margin_y(),
+                    ),
+                    FONT_SIZE as f32,
+                    0.0,
+                    Color::RAYWHITE,
+                );
+                y_pos += self.ui.char_size().y * 1.5;
+            }
         }
     }
+}
+
+fn main() {
+    let r = RMenu::new();
+    r.run();
 }
 
 fn is_executable(path: &PathBuf) -> bool {
