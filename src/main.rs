@@ -5,8 +5,6 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::Command;
 
-// TODO:Launch terminal executables (to a pty or something)
-
 const MAX_SUGGESTIONS: usize = 5;
 const FONT_SIZE: i32 = 32;
 
@@ -60,7 +58,11 @@ fn main() {
             pos += 1;
         }
         if handle.is_key_pressed(KeyboardKey::KEY_ENTER) {
-            Command::new(relevant[selected_item]).spawn().unwrap();
+            Command::new("alacritty")
+                .arg("-e")
+                .arg(relevant[selected_item])
+                .spawn()
+                .unwrap();
             break;
         }
         if handle.is_key_down(KeyboardKey::KEY_BACKSPACE) {
