@@ -119,11 +119,7 @@ impl RMenu {
                 self.buffer_pos += 1;
             }
             if self.h.is_key_pressed(KeyboardKey::KEY_ENTER) {
-                Command::new("alacritty")
-                    .arg("-e")
-                    .arg(&relevant[self.selected_item])
-                    .spawn()
-                    .unwrap();
+                Command::new(&relevant[self.selected_item]).spawn().unwrap();
                 return;
             }
             if self.h.is_key_down(KeyboardKey::KEY_BACKSPACE) {
